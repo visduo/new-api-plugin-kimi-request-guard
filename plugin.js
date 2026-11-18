@@ -1,12 +1,12 @@
 export const meta = {
   apiVersion: 1,
   key: "visduo_kimi-request-guard",
-  name: { en: "Kimi request guard", zh: "Kimi 请求校验" },
+  name: { en: "Kimi Request Guard", zh: "Kimi 请求校验" },
   description: {
     en: "Enforces the Kimi series request contract: parameter limits, media formats, tool rules and reasoning effort",
     zh: "按 Kimi 系列模型的请求规范校验参数限制、媒体格式、工具规则与推理强度",
   },
-  version: "1.0.0",
+  version: "1.1.0",
   author: { name: "多栈科技" },
   website: "https://www.echostack.net/",
 };
