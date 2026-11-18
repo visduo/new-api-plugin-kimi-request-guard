@@ -1,0 +1,308 @@
+{
+  "cases": [
+    {
+      "name": "non-Kimi models pass through",
+      "hook": "ingress",
+      "args": [
+        {"format": "openai", "model": "gpt-4o", "stage": "ingress"},
+        {"body": {"messages": [{"role": "user", "content": "hi"}], "temperature": 0.7}}
+      ],
+      "expected": {"action": "continue"}
+    },
+    {
+      "name": "K3 fills the default reasoning effort",
+      "hook": "ingress",
+      "args": [
+        {"format": "openai", "model": "kimi-k3.1-pro", "stage": "ingress"},
+        {"body": {"messages": [{"role": "user", "content": "hi"}]}}
+      ],
+      "expected": {
+        "action": "continue",
+        "effects": [
+          {"type": "json.patch", "ops": [{"op": "add", "path": "/reasoning_effort", "value": "max"}]}
+        ]
+      }
+    },
+    {
+      "name": "K3 converts thinking.effort to reasoning_effort",
+      "hook": "ingress",
+      "args": [
+        {"format": "openai", "model": "kimi-k3.1-pro-highspeed", "stage": "ingress"},
+        {
+          "body": {
+            "messages": [{"role": "user", "content": "hi"}],
+            "thinking": {"effort": "high"}
+          }
+        }
+      ],
+      "expected": {
+        "action": "continue",
+        "effects": [
+          {
+            "type": "json.patch",
+            "ops": [
+              {"op": "remove", "path": "/thinking"},
+              {"op": "add", "path": "/reasoning_effort", "value": "high"}
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "K3 rejects a modified temperature",
+      "hook": "ingress",
+      "args": [
+        {"format": "openai", "model": "kimi-k3", "stage": "ingress"},
+        {"body": {"messages": [{"role": "user", "content": "hi"}], "temperature": 0.7}}
+      ],
+      "expected": {
+        "action": "reject",
+        "code": "kimi.invalid_request",
+        "message": "temperature is fixed at 1 and cannot be modified."
+      }
+    },
+    {
+      "name": "K3 rejects an empty message list",
+      "hook": "ingress",
+      "args": [
+        {"format": "openai", "model": "kimi-k3.1-pro", "stage": "ingress"},
+        {"body": {"messages": []}}
+      ],
+      "expected": {
+        "action": "reject",
+        "code": "kimi.invalid_request",
+        "message": "messages must not be empty."
+      }
+    },
+    {
+      "name": "K3 rejects an unknown reasoning effort",
+      "hook": "ingress",
+      "args": [
+        {"format": "openai", "model": "kimi-k3.1-pro", "stage": "ingress"},
+        {
+          "body": {
+            "messages": [{"role": "user", "content": "hi"}],
+            "reasoning_effort": "medium"
+          }
+        }
+      ],
+      "expected": {
+        "action": "reject",
+        "code": "kimi.invalid_request",
+        "message": "reasoning_effort must be one of \"low\", \"high\", or \"max\"."
+      }
+    },
+    {
+      "name": "K3 rejects a forced tool choice",
+      "hook": "ingress",
+      "args": [
+        {"format": "openai", "model": "kimi-k3.1-pro", "stage": "ingress"},
+        {
+          "body": {
+            "messages": [{"role": "user", "content": "hi"}],
+            "tools": [
+              {"type": "function", "function": {"name": "get_weather", "parameters": {"type": "object"}}}
+            ],
+            "tool_choice": {"type": "function", "function": {"name": "get_weather"}}
+          }
+        }
+      ],
+      "expected": {
+        "action": "reject",
+        "code": "kimi.invalid_request",
+        "message": "tool_choice 'specified' is incompatible with thinking enabled"
+      }
+    },
+    {
+      "name": "K3 accepts a system message that loads dynamic tools",
+      "hook": "ingress",
+      "args": [
+        {"format": "openai", "model": "kimi-k3.1-pro", "stage": "ingress"},
+        {
+          "body": {
+            "messages": [
+              {
+                "role": "system",
+                "tools": [
+                  {"type": "function", "function": {"name": "search_tools", "parameters": {"type": "object"}}}
+                ]
+              },
+              {"role": "user", "content": "hi"}
+            ]
+          }
+        }
+      ],
+      "expected": {
+        "action": "continue",
+        "effects": [
+          {"type": "json.patch", "ops": [{"op": "add", "path": "/reasoning_effort", "value": "max"}]}
+        ]
+      }
+    },
+    {
+      "name": "K2.6 keeps thinking and accepts the disabled temperature",
+      "hook": "ingress",
+      "args": [
+        {"format": "openai", "model": "kimi-k2.6", "stage": "ingress"},
+        {
+          "body": {
+            "messages": [{"role": "user", "content": "hi"}],
+            "thinking": {"type": "disabled"},
+            "temperature": 0.6
+          }
+        }
+      ],
+      "expected": {"action": "continue"}
+    },
+    {
+      "name": "K2.6 rejects reasoning_effort",
+      "hook": "ingress",
+      "args": [
+        {"format": "openai", "model": "kimi-k2.6", "stage": "ingress"},
+        {
+          "body": {
+            "messages": [{"role": "user", "content": "hi"}],
+            "reasoning_effort": "high"
+          }
+        }
+      ],
+      "expected": {
+        "action": "reject",
+        "code": "kimi.invalid_request",
+        "message": "reasoning_effort is not supported."
+      }
+    },
+    {
+      "name": "K2.6 rejects a forced tool choice",
+      "hook": "ingress",
+      "args": [
+        {"format": "openai", "model": "kimi-k2.6", "stage": "ingress"},
+        {
+          "body": {
+            "messages": [{"role": "user", "content": "hi"}],
+            "tools": [
+              {"type": "function", "function": {"name": "get_weather", "parameters": {"type": "object"}}}
+            ],
+            "tool_choice": "required"
+          }
+        }
+      ],
+      "expected": {
+        "action": "reject",
+        "code": "kimi.invalid_request",
+        "message": "tool_choice \"required\" is not supported by this model."
+      }
+    },
+    {
+      "name": "K2.7 Code rejects disabled thinking",
+      "hook": "ingress",
+      "args": [
+        {"format": "openai", "model": "kimi-k2.7-code", "stage": "ingress"},
+        {
+          "body": {
+            "messages": [{"role": "user", "content": "hi"}],
+            "thinking": {"type": "disabled"}
+          }
+        }
+      ],
+      "expected": {
+        "action": "reject",
+        "code": "kimi.invalid_request",
+        "message": "thinking.type \"disabled\" is not supported by this model."
+      }
+    },
+    {
+      "name": "K2.7 Code rejects dynamic tools",
+      "hook": "ingress",
+      "args": [
+        {"format": "openai", "model": "kimi-k2.7-code", "stage": "ingress"},
+        {
+          "body": {
+            "messages": [
+              {
+                "role": "system",
+                "tools": [
+                  {"type": "function", "function": {"name": "search_tools", "parameters": {"type": "object"}}}
+                ]
+              },
+              {"role": "user", "content": "hi"}
+            ]
+          }
+        }
+      ],
+      "expected": {
+        "action": "reject",
+        "code": "kimi.invalid_request",
+        "message": "Dynamic tools are only supported by the Kimi K3 series."
+      }
+    },
+    {
+      "name": "K2.6 rejects output over its context window",
+      "hook": "ingress",
+      "args": [
+        {"format": "openai", "model": "kimi-k2.6", "stage": "ingress"},
+        {
+          "body": {
+            "messages": [{"role": "user", "content": "hi"}],
+            "max_completion_tokens": 300000
+          }
+        }
+      ],
+      "expected": {
+        "action": "reject",
+        "code": "kimi.invalid_request",
+        "message": "max_completion_tokens must not exceed 262144."
+      }
+    },
+    {
+      "name": "K3 Responses rejects an unknown reasoning effort",
+      "hook": "ingress",
+      "args": [
+        {"format": "openai_responses", "model": "kimi-k3.1-pro", "stage": "ingress"},
+        {"body": {"input": "hi", "reasoning": {"effort": "medium"}}}
+      ],
+      "expected": {
+        "action": "reject",
+        "code": "kimi.invalid_request",
+        "message": "reasoning.effort must be one of \"low\", \"high\", or \"max\"."
+      }
+    },
+    {
+      "name": "K3 Messages fills the default effort",
+      "hook": "ingress",
+      "args": [
+        {"format": "claude", "model": "kimi-k3.1-pro", "stage": "ingress"},
+        {
+          "body": {
+            "max_tokens": 1024,
+            "messages": [{"role": "user", "content": "hi"}]
+          }
+        }
+      ],
+      "expected": {
+        "action": "continue",
+        "effects": [
+          {"type": "json.patch", "ops": [{"op": "add", "path": "/output_config", "value": {"effort": "max"}}]}
+        ]
+      }
+    },
+    {
+      "name": "K3 Messages rejects output over its limit",
+      "hook": "ingress",
+      "args": [
+        {"format": "claude", "model": "kimi-k3.1-pro", "stage": "ingress"},
+        {
+          "body": {
+            "max_tokens": 2000000,
+            "messages": [{"role": "user", "content": "hi"}]
+          }
+        }
+      ],
+      "expected": {
+        "action": "reject",
+        "code": "kimi.invalid_request",
+        "message": "max_tokens must not exceed 1048576."
+      }
+    }
+  ]
+}
