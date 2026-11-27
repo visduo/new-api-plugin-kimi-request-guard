@@ -18,9 +18,3 @@ locale: "zh-CN"
 - 不带 `tool_calls` 的 assistant 消息如果正文为空，不再透传到上游；此前 Kimi 会返回 `a message has empty content, please check the conversation history and retry`。
 - 带 `tool_calls` 的 assistant 消息如果正文是 `null`、缺失或空白文本块，会改写为 `""`；客户端用 `content: null` 保存工具调用历史时不再被上游拒绝。
 - 历史含内联媒体、改写操作超出网关限额时，返回明确的拒绝原因，不再以 `invalid_effect` 让实例失败。
-
-## [1.1.0]
-
-### Changed
-
-- 插件列表中的名称改为 Kimi Request Guard。

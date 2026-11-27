@@ -20,9 +20,3 @@ translations:
 - Reject an assistant message with empty content that carries no `tool_calls` instead of passing it upstream, which Kimi answers with `a message has empty content, please check the conversation history and retry`.
 - Rewrite `null`, missing, or blank text-block content on an assistant message that carries `tool_calls` to `""`, so a tool-call history built by a client that leaves `content: null` no longer fails upstream.
 - Answer with a clear rejection instead of failing the instance with `invalid_effect` when a history with inline media needs more rewrite operations than the gateway accepts.
-
-## [1.1.0]
-
-### Changed
-
-- Rename the plugin to Kimi Request Guard in the plugin list.
