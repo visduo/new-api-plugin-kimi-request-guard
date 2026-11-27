@@ -69,6 +69,7 @@ K3 always thinks and uses the top-level reasoning effort. The plugin accepts `lo
 - Tool names must match `^[a-zA-Z_][a-zA-Z0-9_-]{0,127}$` and must not repeat.
 - `tool_calls` must be paired with the matching `tool` messages or output items.
 - Tool and output JSON Schemas must not contain infinite recursion without a termination condition.
+- `type` in a JSON Schema must be one of `null`, `boolean`, `object`, `array`, `number`, `integer`, `string`, or an array of those. Other spellings such as `int`, `bool`, `float`, or `String` are rejected with the path, because Kimi answers them with `response_format.json_schema is not a valid moonshot flavored json schema`.
 - Images and videos must be base64 data URLs, uploaded file references (`ms://...`), or the media the gateway has already inlined. URL-formatted media and SVG images are rejected.
 - `tool_choice` may be `auto`, `none`, or `required`. A function object is rejected because it conflicts with thinking. The K2 families reject `required`.
 - Dynamic tools, declared as `tools` on a `system` message, are accepted on K3 only.

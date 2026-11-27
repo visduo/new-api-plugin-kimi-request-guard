@@ -668,6 +668,38 @@
           }
         ]
       }
+    },
+    {
+      "name": "K3 rejects a json_schema type that MFJS does not define",
+      "hook": "ingress",
+      "args": [
+        {"format": "openai", "model": "kimi-k3.1-pro", "stage": "ingress"},
+        {
+          "body": {
+            "messages": [{"role": "user", "content": "hi"}],
+            "response_format": {
+              "type": "json_schema",
+              "json_schema": {
+                "name": "report",
+                "strict": true,
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "title": {"type": "string"},
+                    "score": {"type": "float"}
+                  },
+                  "required": ["title"]
+                }
+              }
+            }
+          }
+        }
+      ],
+      "expected": {
+        "action": "reject",
+        "code": "kimi.invalid_request",
+        "message": "json_schema.schema: At path 'properties.score': invalid type, type must be one of null, boolean, object, array, number, integer, string."
+      }
     }
   ]
 }

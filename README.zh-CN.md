@@ -68,6 +68,7 @@ K3 始终思考，使用顶层的推理强度。插件接受 `low`、`high`、`m
 - 工具名必须匹配 `^[a-zA-Z_][a-zA-Z0-9_-]{0,127}$`，且不能重名。
 - `tool_calls` 必须与对应的 `tool` 消息或输出项一一配对。
 - 工具和输出的 JSON Schema 不能包含没有终止条件的无限递归。
+- JSON Schema 的 `type` 只能是 `null`、`boolean`、`object`、`array`、`number`、`integer`、`string` 之一，或这些值的数组。`int`、`bool`、`float`、`String` 等写法会被拒绝并给出路径，因为 Kimi 会返回 `response_format.json_schema is not a valid moonshot flavored json schema`。
 - 图片和视频必须是 base64 data URL、已上传的文件引用（`ms://...`），或网关已经内联的媒体。URL 形式的媒体和 SVG 图片会被拒绝。
 - `tool_choice` 可以是 `auto`、`none` 或 `required`。指定具体函数的对象会与思考冲突，因此被拒绝；K2 系列不接受 `required`。
 - 在 `system` 消息里声明 `tools` 的动态工具只有 K3 支持。

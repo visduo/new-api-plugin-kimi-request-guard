@@ -6,7 +6,7 @@ export const meta = {
     en: "Enforces the Kimi series request contract: parameter limits, media formats, tool rules and reasoning effort",
     zh: "按 Kimi 系列模型的请求规范校验参数限制、媒体格式、工具规则与推理强度",
   },
-  version: "1.1.3",
+  version: "1.1.4",
   author: { name: "多栈科技" },
   website: "https://www.echostack.net/",
 };
@@ -358,10 +358,121 @@ function findRecursionPath(root) {
   return problem;
 }
 
+// MFJS 只接受这 7 个 type 取值；大小写不符、int/bool/dict 等写法都会被上游拒绝。
+const MFJS_TYPES = ["null", "boolean", "object", "array", "number", "integer", "string"];
+
+// 校验单个节点的 type 取值，返回问题描述或空串。
+// 官方把 type 不是字符串/数组、数组为空、取值不在枚举里都算 schema 不合法。
+function typeProblem(node) {
+  if (!hasOwn(node, "type")) return "";
+  const type = node.type;
+  if (typeof type === "string") {
+    return MFJS_TYPES.indexOf(type) < 0 ? "invalid type" : "";
+  }
+  if (!Array.isArray(type)) return "type must be a string or an array of strings";
+  if (type.length === 0) return "type array cannot be empty";
+  for (const item of type) {
+    if (typeof item !== "string" || MFJS_TYPES.indexOf(item) < 0) return "invalid type";
+  }
+  return "";
+}
+
+// 沿 Schema 树找出第一个非法的 type，返回 {path, reason} 或 null。
+// 遍历范围与官方 walle 的 strict 级别一致：$defs、properties、items、
+// additionalProperties 和 anyOf。oneOf / allOf / not / if / prefixItems /
+// definitions 等上游不遍历，这里也不展开，避免把上游接受的 schema 误判。
+function findInvalidType(node, path) {
+  if (!isObject(node)) return null;
+  const here = path === "" ? "root" : path;
+  const reason = typeProblem(node);
+  if (reason) return { path: here, reason: reason };
+  const defs = node.$defs;
+  if (isObject(defs)) {
+    for (const name of Object.keys(defs)) {
+      const problem = findInvalidType(defs[name], "$defs." + name);
+      if (problem) return problem;
+    }
+  }
+  const properties = node.properties;
+  if (isObject(properties)) {
+    for (const name of Object.keys(properties)) {
+      // 官方要求每个属性都给一个 schema 对象，true/false 简写会被拒绝。
+      if (!isObject(properties[name])) {
+        return { path: "properties", reason: "property schema for '" + name + "' must be an object" };
+      }
+      const problem = findInvalidType(properties[name], "properties." + name);
+      if (problem) return problem;
+    }
+  }
+  const items = node.items;
+  if (isObject(items)) {
+    const problem = findInvalidType(items, "items");
+    if (problem) return problem;
+  }
+  const additional = node.additionalProperties;
+  if (isObject(additional)) {
+    const problem = findInvalidType(additional, "additionalProperties");
+    if (problem) return problem;
+  }
+  const anyOf = node.anyOf;
+  if (Array.isArray(anyOf)) {
+    for (const branch of anyOf) {
+      const problem = findInvalidType(branch, "anyOf");
+      if (problem) return problem;
+    }
+  }
+  return null;
+}
+
+// 收集文档里所有 $ref 指向的 definitions 名字；官方只把被引用的定义并入 $defs。
+function collectDefinitionRefs(value, names) {
+  if (Array.isArray(value)) {
+    for (const item of value) collectDefinitionRefs(item, names);
+    return;
+  }
+  if (!isObject(value)) return;
+  for (const key of Object.keys(value)) {
+    const item = value[key];
+    if (key === "$ref" && typeof item === "string" && item.indexOf("#/definitions/") === 0) {
+      names.add(item.slice("#/definitions/".length));
+      continue;
+    }
+    collectDefinitionRefs(item, names);
+  }
+}
+
+// 按 MFJS 校验 type；与官方 walle 的 strict 级别一致。
+function checkMfjsType(schema, label) {
+  let problem = findInvalidType(schema, "");
+  if (!problem && isObject(schema.definitions)) {
+    const names = new Set();
+    collectDefinitionRefs(schema, names);
+    for (const name of Object.keys(schema.definitions)) {
+      if (!names.has(name)) continue;
+      problem = findInvalidType(schema.definitions[name], "definitions." + name);
+      if (problem) break;
+    }
+  }
+  if (!problem) return null;
+  if (problem.reason !== "invalid type") {
+    return label + ": At path '" + problem.path + "': " + problem.reason + ".";
+  }
+  return (
+    label +
+    ": At path '" +
+    problem.path +
+    "': invalid type, type must be one of " +
+    MFJS_TYPES.join(", ") +
+    "."
+  );
+}
+
 function checkSchema(schema, label) {
   if (!present(schema)) return null;
   if (!isObject(schema) && schema !== true) return label + " must be an object.";
   if (!isObject(schema)) return null;
+  const invalidType = checkMfjsType(schema, label);
+  if (invalidType) return invalidType;
   const path = findRecursionPath(schema);
   if (!path) return null;
   return label + ": At path '" + path + "': detected infinite recursion without termination condition";
