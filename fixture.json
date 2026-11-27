@@ -303,6 +303,371 @@
         "code": "kimi.invalid_request",
         "message": "max_tokens must not exceed 1048576."
       }
+    },
+    {
+      "name": "K3 rejects an assistant message with empty content",
+      "hook": "ingress",
+      "args": [
+        {"format": "openai", "model": "kimi-k3.1-pro", "stage": "ingress"},
+        {
+          "body": {
+            "messages": [
+              {"role": "user", "content": "hi"},
+              {"role": "assistant", "content": ""},
+              {"role": "user", "content": "retry"}
+            ]
+          }
+        }
+      ],
+      "expected": {
+        "action": "reject",
+        "code": "kimi.invalid_request",
+        "message": "messages[1] (assistant): content must not be empty."
+      }
+    },
+    {
+      "name": "K3 accepts the documented empty content on an assistant tool call",
+      "hook": "ingress",
+      "args": [
+        {"format": "openai", "model": "kimi-k3.1-pro", "stage": "ingress"},
+        {
+          "body": {
+            "messages": [
+              {"role": "user", "content": "hi"},
+              {
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [
+                  {"id": "search:0", "type": "function", "function": {"name": "search", "arguments": "{}"}}
+                ]
+              },
+              {"role": "tool", "tool_call_id": "search:0", "content": "ok"}
+            ]
+          }
+        }
+      ],
+      "expected": {
+        "action": "continue",
+        "effects": [
+          {"type": "json.patch", "ops": [{"op": "add", "path": "/reasoning_effort", "value": "max"}]}
+        ]
+      }
+    },
+    {
+      "name": "K3 normalizes null content on an assistant tool call",
+      "hook": "ingress",
+      "args": [
+        {"format": "openai", "model": "kimi-k3.1-pro", "stage": "ingress"},
+        {
+          "body": {
+            "messages": [
+              {"role": "user", "content": "hi"},
+              {
+                "role": "assistant",
+                "content": null,
+                "tool_calls": [
+                  {"id": "search:0", "type": "function", "function": {"name": "search", "arguments": "{}"}}
+                ]
+              },
+              {"role": "tool", "tool_call_id": "search:0", "content": "ok"}
+            ]
+          }
+        }
+      ],
+      "expected": {
+        "action": "continue",
+        "effects": [
+          {
+            "type": "json.patch",
+            "ops": [
+              {"op": "add", "path": "/reasoning_effort", "value": "max"},
+              {"op": "add", "path": "/messages/1/content", "value": ""}
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "K3 normalizes blank text blocks on an assistant tool call",
+      "hook": "ingress",
+      "args": [
+        {"format": "openai", "model": "kimi-k3.1-pro", "stage": "ingress"},
+        {
+          "body": {
+            "messages": [
+              {"role": "user", "content": "hi"},
+              {
+                "role": "assistant",
+                "content": [{"type": "text", "text": " "}],
+                "tool_calls": [
+                  {"id": "search:0", "type": "function", "function": {"name": "search", "arguments": "{}"}}
+                ]
+              },
+              {"role": "tool", "tool_call_id": "search:0", "content": "ok"}
+            ]
+          }
+        }
+      ],
+      "expected": {
+        "action": "continue",
+        "effects": [
+          {
+            "type": "json.patch",
+            "ops": [
+              {"op": "add", "path": "/reasoning_effort", "value": "max"},
+              {"op": "add", "path": "/messages/1/content", "value": ""}
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "K3 rejects an empty tool result",
+      "hook": "ingress",
+      "args": [
+        {"format": "openai", "model": "kimi-k3.1-pro", "stage": "ingress"},
+        {
+          "body": {
+            "messages": [
+              {"role": "user", "content": "hi"},
+              {
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [
+                  {"id": "search:0", "type": "function", "function": {"name": "search", "arguments": "{}"}}
+                ]
+              },
+              {"role": "tool", "tool_call_id": "search:0", "content": ""}
+            ]
+          }
+        }
+      ],
+      "expected": {
+        "action": "reject",
+        "code": "kimi.invalid_request",
+        "message": "messages[2] (tool): content must not be empty."
+      }
+    },
+    {
+      "name": "K3 rejects an empty Responses message",
+      "hook": "ingress",
+      "args": [
+        {"format": "openai_responses", "model": "kimi-k3.1-pro", "stage": "ingress"},
+        {
+          "body": {
+            "input": [
+              {"type": "message", "role": "user", "content": "hi"},
+              {"type": "message", "role": "assistant", "content": []}
+            ]
+          }
+        }
+      ],
+      "expected": {
+        "action": "reject",
+        "code": "kimi.invalid_request",
+        "message": "input[1] (assistant): content must not be empty."
+      }
+    },
+    {
+      "name": "K3 rejects an empty Messages message",
+      "hook": "ingress",
+      "args": [
+        {"format": "claude", "model": "kimi-k3.1-pro", "stage": "ingress"},
+        {
+          "body": {
+            "max_tokens": 1024,
+            "messages": [
+              {"role": "user", "content": "hi"},
+              {"role": "assistant", "content": " "}
+            ]
+          }
+        }
+      ],
+      "expected": {
+        "action": "reject",
+        "code": "kimi.invalid_request",
+        "message": "messages[1] (assistant): content must not be empty."
+      }
+    },
+    {
+      "name": "K3 rejects empty Gemini parts",
+      "hook": "ingress",
+      "args": [
+        {"format": "gemini", "model": "kimi-k3.1-pro", "stage": "ingress"},
+        {
+          "body": {
+            "contents": [
+              {"role": "user", "parts": [{"text": "hi"}]},
+              {"role": "model", "parts": []}
+            ]
+          }
+        }
+      ],
+      "expected": {
+        "action": "reject",
+        "code": "kimi.invalid_request",
+        "message": "contents[1] (model): parts must not be empty."
+      }
+    },
+    {
+      "name": "K3 merges many empty tool-call contents into one messages patch",
+      "hook": "ingress",
+      "args": [
+        {"format": "openai", "model": "kimi-k3.1-pro", "stage": "ingress"},
+        {
+          "body": {
+            "messages": [
+              {"role": "user", "content": "hi"},
+              {
+                "role": "assistant",
+                "content": null,
+                "tool_calls": [
+                  {"id": "c0", "type": "function", "function": {"name": "f", "arguments": "{}"}}
+                ]
+              },
+              {"role": "tool", "tool_call_id": "c0", "content": "ok"},
+              {
+                "role": "assistant",
+                "content": [{"type": "text", "text": " "}],
+                "tool_calls": [
+                  {"id": "c1", "type": "function", "function": {"name": "f", "arguments": "{}"}}
+                ]
+              },
+              {"role": "tool", "tool_call_id": "c1", "content": "ok"},
+              {
+                "role": "assistant",
+                "content": null,
+                "tool_calls": [
+                  {"id": "c2", "type": "function", "function": {"name": "f", "arguments": "{}"}}
+                ]
+              },
+              {"role": "tool", "tool_call_id": "c2", "content": "ok"},
+              {
+                "role": "assistant",
+                "content": null,
+                "tool_calls": [
+                  {"id": "c3", "type": "function", "function": {"name": "f", "arguments": "{}"}}
+                ]
+              },
+              {"role": "tool", "tool_call_id": "c3", "content": "ok"},
+              {
+                "role": "assistant",
+                "content": null,
+                "tool_calls": [
+                  {"id": "c4", "type": "function", "function": {"name": "f", "arguments": "{}"}}
+                ]
+              },
+              {"role": "tool", "tool_call_id": "c4", "content": "ok"},
+              {
+                "role": "assistant",
+                "content": null,
+                "tool_calls": [
+                  {"id": "c5", "type": "function", "function": {"name": "f", "arguments": "{}"}}
+                ]
+              },
+              {"role": "tool", "tool_call_id": "c5", "content": "ok"},
+              {
+                "role": "assistant",
+                "content": null,
+                "tool_calls": [
+                  {"id": "c6", "type": "function", "function": {"name": "f", "arguments": "{}"}}
+                ]
+              },
+              {"role": "tool", "tool_call_id": "c6", "content": "ok"},
+              {
+                "role": "assistant",
+                "content": null,
+                "tool_calls": [
+                  {"id": "c7", "type": "function", "function": {"name": "f", "arguments": "{}"}}
+                ]
+              },
+              {"role": "tool", "tool_call_id": "c7", "content": "ok"}
+            ]
+          }
+        }
+      ],
+      "expected": {
+        "action": "continue",
+        "effects": [
+          {
+            "type": "json.patch",
+            "ops": [
+              {"op": "add", "path": "/reasoning_effort", "value": "max"},
+              {
+                "op": "replace",
+                "path": "/messages",
+                "value": [
+                  {"role": "user", "content": "hi"},
+                  {
+                    "role": "assistant",
+                    "content": "",
+                    "tool_calls": [
+                      {"id": "c0", "type": "function", "function": {"name": "f", "arguments": "{}"}}
+                    ]
+                  },
+                  {"role": "tool", "tool_call_id": "c0", "content": "ok"},
+                  {
+                    "role": "assistant",
+                    "content": "",
+                    "tool_calls": [
+                      {"id": "c1", "type": "function", "function": {"name": "f", "arguments": "{}"}}
+                    ]
+                  },
+                  {"role": "tool", "tool_call_id": "c1", "content": "ok"},
+                  {
+                    "role": "assistant",
+                    "content": "",
+                    "tool_calls": [
+                      {"id": "c2", "type": "function", "function": {"name": "f", "arguments": "{}"}}
+                    ]
+                  },
+                  {"role": "tool", "tool_call_id": "c2", "content": "ok"},
+                  {
+                    "role": "assistant",
+                    "content": "",
+                    "tool_calls": [
+                      {"id": "c3", "type": "function", "function": {"name": "f", "arguments": "{}"}}
+                    ]
+                  },
+                  {"role": "tool", "tool_call_id": "c3", "content": "ok"},
+                  {
+                    "role": "assistant",
+                    "content": "",
+                    "tool_calls": [
+                      {"id": "c4", "type": "function", "function": {"name": "f", "arguments": "{}"}}
+                    ]
+                  },
+                  {"role": "tool", "tool_call_id": "c4", "content": "ok"},
+                  {
+                    "role": "assistant",
+                    "content": "",
+                    "tool_calls": [
+                      {"id": "c5", "type": "function", "function": {"name": "f", "arguments": "{}"}}
+                    ]
+                  },
+                  {"role": "tool", "tool_call_id": "c5", "content": "ok"},
+                  {
+                    "role": "assistant",
+                    "content": "",
+                    "tool_calls": [
+                      {"id": "c6", "type": "function", "function": {"name": "f", "arguments": "{}"}}
+                    ]
+                  },
+                  {"role": "tool", "tool_call_id": "c6", "content": "ok"},
+                  {
+                    "role": "assistant",
+                    "content": "",
+                    "tool_calls": [
+                      {"id": "c7", "type": "function", "function": {"name": "f", "arguments": "{}"}}
+                    ]
+                  },
+                  {"role": "tool", "tool_call_id": "c7", "content": "ok"}
+                ]
+              }
+            ]
+          }
+        ]
+      }
     }
   ]
 }

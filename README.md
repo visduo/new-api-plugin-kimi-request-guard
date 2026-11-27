@@ -64,7 +64,8 @@ K3 always thinks and uses the top-level reasoning effort. The plugin accepts `lo
 
 ### Messages, media, and tools
 
-- Message content must not be empty, and the message list must not be empty.
+- Message content must not be empty, and the message list must not be empty. A rejection names the message position and role, such as `messages[2] (user)`.
+- An assistant message that carries `tool_calls` is the one exception. Kimi documents its `content` as an empty string, so a `null`, missing, or blank text-block content is rewritten to `""` and the message is kept. A long tool-call history is rewritten with one `messages` replacement, so the patch stays inside the gateway's 512-operation limit.
 - Tool names must match `^[a-zA-Z_][a-zA-Z0-9_-]{0,127}$` and must not repeat.
 - `tool_calls` must be paired with the matching `tool` messages or output items.
 - Tool and output JSON Schemas must not contain infinite recursion without a termination condition.

@@ -6,7 +6,7 @@ export const meta = {
     en: "Enforces the Kimi series request contract: parameter limits, media formats, tool rules and reasoning effort",
     zh: "按 Kimi 系列模型的请求规范校验参数限制、媒体格式、工具规则与推理强度",
   },
-  version: "1.1.0",
+  version: "1.1.3",
   author: { name: "多栈科技" },
   website: "https://www.echostack.net/",
 };
@@ -52,6 +52,12 @@ const TOOL_NAME = /^[a-zA-Z_][a-zA-Z0-9_-]{0,127}$/;
 
 // 宿主把内联媒体换成 "[media:N]"，真实类型在 req.media 里。
 const MEDIA_REF = /^\[media:(\d+)\]$/;
+
+// 网关单次请求最多接受 512 条 json.patch 操作，留一条给 reasoning_effort。
+const MAX_PATCH_OPS = 511;
+
+// 需要改写的消息达到这个数量时，合并成一次 replace /messages。
+const MIN_REPLACE_MESSAGES = 8;
 
 // K3 单次输出上限。
 const MAX_OUTPUT_TOKENS = 1048576;
@@ -501,15 +507,17 @@ function checkChatTools(body, family) {
   const messages = Array.isArray(body.messages) ? body.messages : [];
   const groups = [];
   if (present(body.tools)) groups.push(body.tools);
-  for (const message of messages) {
+  for (let i = 0; i < messages.length; i++) {
+    const message = messages[i];
     if (!isObject(message) || !present(message.tools)) continue;
     if (family !== "k3") {
       return "Dynamic tools are only supported by the Kimi K3 series.";
     }
     // 动态工具只允许出现在 system 消息里。
-    if (message.role !== "system") return "Dynamic tools are only allowed in system messages.";
-    // 带工具声明的 system 消息不能同时带正文。
-    if (!isEmptyContent(message.content)) return "A dynamic tool message must not carry content.";
+    if (message.role !== "system") {
+      return "messages[" + i + "]: dynamic tools are only allowed in system messages.";
+    }
+    // 带工具声明的 system 消息不能同时带正文，由 checkChatContent 统一校验。
     groups.push(message.tools);
   }
   let total = 0;
@@ -547,21 +555,70 @@ function isEmptyContent(content) {
   return false;
 }
 
-// 校验 Chat 消息的 content：官方要求 content 不能为空。
+// Responses 的 content 是字符串或 content part 数组，空数组与纯空文本都算空。
+function isEmptyResponsesContent(content) {
+  if (!present(content)) return true;
+  if (typeof content === "string") return content.trim() === "";
+  if (!Array.isArray(content)) return false;
+  if (content.length === 0) return true;
+  for (const part of content) {
+    if (!isObject(part) || typeof part.text !== "string" || part.text.trim() !== "") return false;
+  }
+  return true;
+}
+
+// 校验 Chat 消息的 content：官方要求 content 不得为空。
 // 例外：带动态工具声明的 system 消息本来就要求省略正文；
-// assistant 的工具调用回复也允许空正文（Kimi 实际返回 content: ""）。
-function checkChatContent(messages) {
-  for (const message of messages) {
+// 带 tool_calls 的 assistant 消息在官方指南里是 content: ""，需要把 null 与空白块归一成空串。
+// 需要改写的消息下标收集到 normalize，由 chatContentOps 统一生成补丁。
+function checkChatContent(messages, normalize) {
+  for (let i = 0; i < messages.length; i++) {
+    const message = messages[i];
     if (!isObject(message)) return "Messages must be objects.";
     const role = message.role;
-    if (role === "assistant") continue;
-    // 动态工具声明的 system 消息允许空正文，交给 checkChatTools 判断。
-    if (role === "system" && present(message.tools)) continue;
+    // 动态工具声明的 system 消息必须省略正文，交给 checkChatTools 继续校验。
+    if (role === "system" && present(message.tools)) {
+      if (!isEmptyContent(message.content)) {
+        return "messages[" + i + "] (system): a dynamic tool message must not carry content.";
+      }
+      continue;
+    }
+    // 官方指南里工具调用轮的 assistant content 是 ""；null 与空白 text 块会被上游判空。
+    if (role === "assistant" && Array.isArray(message.tool_calls) && message.tool_calls.length > 0) {
+      if (message.content !== "" && isEmptyContent(message.content)) {
+        normalize.push(i);
+      }
+      continue;
+    }
     if (isEmptyContent(message.content)) {
-      return "Message content must not be empty.";
+      return "messages[" + i + "] (" + String(role) + "): content must not be empty.";
     }
   }
   return null;
+}
+
+// 把需要归一的 content 生成补丁。
+// 消息较多且没有媒体占位符时合并成一次 replace /messages，把操作数从 N 降到 1；
+// 有 "[media:N]" 占位符时不能整段替换（补丁 value 不允许含占位符），退回逐条 add。
+// 逐条 add 放不进预算时返回 null，由调用方给出明确的拒绝原因。
+function chatContentOps(body, normalize, budget) {
+  if (normalize.length === 0) return [];
+  const messages = body.messages;
+  if (normalize.length >= MIN_REPLACE_MESSAGES && JSON.stringify(messages).indexOf("[media:") < 0) {
+    const copy = messages.slice();
+    for (const i of normalize) {
+      const next = Object.assign({}, copy[i]);
+      next.content = "";
+      copy[i] = next;
+    }
+    return [{ op: "replace", path: "/messages", value: copy }];
+  }
+  if (normalize.length > budget) return null;
+  const ops = [];
+  for (const i of normalize) {
+    ops.push({ op: "add", path: "/messages/" + i + "/content", value: "" });
+  }
+  return ops;
 }
 
 // 校验 Chat 历史里的 tool_calls 与 tool 消息是否一一配对。
@@ -679,15 +736,16 @@ function checkChat(body, media, family) {
   if (tools) return { problem: tools };
   const messages = Array.isArray(body.messages) ? body.messages : [];
   if (messages.length === 0) return { problem: "messages must not be empty." };
-  // 空 content 直接拒绝（动态工具消息与 assistant 工具调用除外）。
-  const content = checkChatContent(messages);
+  // 空 content 直接拒绝；工具调用轮的空正文会归一成官方要求的 ""。
+  const normalize = [];
+  const content = checkChatContent(messages, normalize);
   if (content) return { problem: content };
   const history = checkChatToolHistory(messages);
   if (history) return { problem: history };
   const mediaProblem = checkChatMedia(messages, media);
   if (mediaProblem) return { problem: mediaProblem };
   // 与其它协议保持同一返回结构：effort 为最终强度，hasThinking 表示客户端传了 thinking。
-  return { effort: reasoning.effort, hasThinking: hasOwn(body, "thinking") };
+  return { effort: reasoning.effort, hasThinking: hasOwn(body, "thinking"), normalize: normalize };
 }
 
 // ===================== Responses（openai_responses） =====================
@@ -738,15 +796,24 @@ function checkResponsesTool(tool, state) {
 // 校验 Responses 的 input 项：消息、函数调用、调用结果、附加工具等。
 function checkResponsesInput(items, media, state) {
   const pending = new Map();
-  for (const item of items) {
+  for (let i = 0; i < items.length; i++) {
+    const item = items[i];
     if (!isObject(item)) return "Input items must be objects.";
     // type 缺省时按 message 处理。
     const type = present(item.type) ? item.type : "message";
     if (type === "message") {
+      if (isEmptyResponsesContent(item.content)) {
+        return "input[" + i + "] (" + String(item.role) + "): content must not be empty.";
+      }
       if (Array.isArray(item.content)) {
         for (const part of item.content) {
           if (!isObject(part)) return "Content parts must be objects.";
-          if (part.type === "input_text" || part.type === "output_text" || part.type === "text") continue;
+          if (part.type === "input_text" || part.type === "output_text" || part.type === "text") {
+            if (typeof part.text !== "string" || part.text.trim() === "") {
+              return "input[" + i + "]: text content must not be empty.";
+            }
+            continue;
+          }
           if (part.type === "input_image" || part.type === "image_url") {
             const url = typeof part.image_url === "string" ? part.image_url : "";
             const problem = checkMediaUrl(url, "image", media);
@@ -921,19 +988,43 @@ function checkClaudeImage(source, media) {
   return "Image source type must be base64 or url.";
 }
 
+// Messages 的 content 是字符串或内容块数组，空串、空数组和纯空文本块都算空。
+function isEmptyClaudeContent(content) {
+  if (!present(content)) return true;
+  if (typeof content === "string") return content.trim() === "";
+  if (!Array.isArray(content)) return false;
+  if (content.length === 0) return true;
+  for (const block of content) {
+    if (!isObject(block)) return false;
+    if (block.type === "text" && typeof block.text === "string" && block.text.trim() === "") continue;
+    return false;
+  }
+  return true;
+}
+
 // 校验 Claude 消息块，并配对 tool_use 与 tool_result。
 function checkClaudeMessages(messages, media) {
   const pending = new Map();
-  for (const message of messages) {
+  for (let i = 0; i < messages.length; i++) {
+    const message = messages[i];
     if (!isObject(message)) return "Messages must be objects.";
     if (message.role !== "user" && message.role !== "assistant") {
       return "Message role must be user or assistant.";
+    }
+    if (isEmptyClaudeContent(message.content)) {
+      return "messages[" + i + "] (" + message.role + "): content must not be empty.";
     }
     if (typeof message.content === "string") continue;
     if (!Array.isArray(message.content)) return "Message content must be a string or an array.";
     for (const block of message.content) {
       if (!isObject(block)) return "Content blocks must be objects.";
-      if (block.type === "text" || block.type === "thinking" || block.type === "redacted_thinking") continue;
+      if (block.type === "text") {
+        if (typeof block.text !== "string" || block.text.trim() === "") {
+          return "messages[" + i + "]: text blocks must not be empty.";
+        }
+        continue;
+      }
+      if (block.type === "thinking" || block.type === "redacted_thinking") continue;
       if (block.type === "image") {
         const problem = checkClaudeImage(block.source, media);
         if (problem) return problem;
@@ -1106,6 +1197,20 @@ function checkGeminiParts(parts, media, pending) {
   return null;
 }
 
+// Gemini 的 parts 为空、或只有空文本时都算没有正文。
+function isEmptyGeminiParts(parts) {
+  if (!Array.isArray(parts) || parts.length === 0) return true;
+  for (const part of parts) {
+    if (!isObject(part)) return false;
+    if (typeof part.text === "string") {
+      if (part.text.trim() !== "") return false;
+      continue;
+    }
+    return false;
+  }
+  return true;
+}
+
 // Gemini 协议入口：校验 contents、generationConfig、tools 与 toolConfig。
 function checkGemini(body, media, family) {
   const config = body.generationConfig;
@@ -1207,12 +1312,16 @@ function checkGemini(body, media, family) {
 
   if (!Array.isArray(body.contents)) return { problem: "contents must be an array." };
   const pending = new Map();
-  for (const content of body.contents) {
+  for (let i = 0; i < body.contents.length; i++) {
+    const content = body.contents[i];
     if (!isObject(content)) return { problem: "contents must contain objects." };
     if (present(content.role) && ["user", "model", "system"].indexOf(content.role) < 0) {
       return { problem: "content.role must be user, model, or system." };
     }
     if (!Array.isArray(content.parts)) return { problem: "content needs a parts array." };
+    if (isEmptyGeminiParts(content.parts)) {
+      return { problem: "contents[" + i + "] (" + String(content.role) + "): parts must not be empty." };
+    }
     const problem = checkGeminiParts(content.parts, media, pending);
     if (problem) return { problem: problem };
   }
@@ -1291,6 +1400,16 @@ export function ingress(ctx, req) {
   if (result.problem) return reject("kimi.invalid_request", result.problem);
 
   const ops = reasoningEffects(ctx.format, body, result, family);
+  if (result.normalize && result.normalize.length > 0) {
+    const contentOps = chatContentOps(body, result.normalize, MAX_PATCH_OPS - ops.length);
+    if (!contentOps) {
+      return reject(
+        "kimi.invalid_request",
+        "too many assistant messages with empty content and inline media to normalize in one request.",
+      );
+    }
+    ops.push.apply(ops, contentOps);
+  }
   if (ops.length === 0) return { action: "continue" };
   return { action: "continue", effects: [{ type: "json.patch", ops: ops }] };
 }
